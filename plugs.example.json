@@ -1,0 +1,22 @@
+[
+  {
+    "name": "geyser",
+    "label": "Geyser",
+    "icon": "🔥",
+    "aliases": ["water heater", "heater", "hot water"],
+    "device_id": "<tuya device id>",
+    "ip": "<lan ip, only for local transport>",
+    "local_key": "<local key, only for local transport>",
+    "version": 3.5,
+    "auto_off_minutes": 30,
+    "max_on_minutes": 120,
+    "off_when_heated": true
+  },
+  {
+    "name": "purifier",
+    "label": "Purifier",
+    "icon": "🌬",
+    "aliases": ["air purifier"],
+    "device_id": "<tuya device id>"
+  }
+]

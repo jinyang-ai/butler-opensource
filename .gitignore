@@ -1,0 +1,13 @@
+.env
+*.db
+*.sqlite
+devices.json
+plugs.json
+tinytuya.json
+tuya-raw.json
+snapshot.json
+.venv/
+__pycache__/
+logs/
+.pytest_cache/
+shortcuts-out/

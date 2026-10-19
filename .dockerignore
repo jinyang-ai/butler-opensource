@@ -1,0 +1,7 @@
+.env
+.venv
+*.json
+!plugs.example.json
+logs
+tests
+__pycache__
