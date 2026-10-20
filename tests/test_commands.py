@@ -1,7 +1,7 @@
 import pytest
 
-from butler import commands, devices, scheduler
-from butler.config import settings
+from zebplug import commands, devices, scheduler
+from zebplug.config import settings
 
 
 class FakePlug(devices.Device):
@@ -28,7 +28,7 @@ def env(tmp_path, monkeypatch):
     })
     monkeypatch.setattr(scheduler, "_sched", None)
     monkeypatch.setattr(commands, "_recent", {"devices": [], "ts": 0.0})
-    from butler import store
+    from zebplug import store
     monkeypatch.setattr(store, "_conn", None)  # fresh DB per test (data_dir is a tmp dir)
     scheduler.scheduler().start(paused=True)
     yield
@@ -111,7 +111,7 @@ def test_errors():
 
 
 def test_llm_step_conversion():
-    from butler import llm, nlp
+    from zebplug import llm, nlp
     from datetime import datetime, timedelta
 
     al = commands.aliases()
@@ -128,7 +128,7 @@ def test_llm_step_conversion():
 
 
 def test_llm_failure_falls_back(monkeypatch):
-    from butler import llm
+    from zebplug import llm
 
     monkeypatch.setattr(llm, "enabled", lambda: True)
     monkeypatch.setattr(llm, "parse", lambda *a: (_ for _ in ()).throw(RuntimeError("429")))
@@ -136,7 +136,7 @@ def test_llm_failure_falls_back(monkeypatch):
 
 
 def test_dashboard_render_and_undo():
-    from butler import bot
+    from zebplug import bot
 
     bot.STATE = bot.State()
     st = bot.STATE.get(1)
@@ -189,7 +189,7 @@ def test_tuya_trial_alert(monkeypatch):
 
 def test_away_mode_pauses_and_resumes(monkeypatch):
     from datetime import datetime, timedelta
-    from butler import nlp
+    from zebplug import nlp
 
     monkeypatch.setattr(scheduler.notify, "event", lambda *_: None)
     commands.execute("every day 6am geyser on")
@@ -275,7 +275,7 @@ def test_geyser_blanket_auto_off(monkeypatch):
 
 
 def test_energy_report(monkeypatch):
-    from butler import store
+    from zebplug import store
 
     monkeypatch.setattr(scheduler.notify, "event", lambda *_: None)
     g = devices.get("geyser"); g.device_id = "dev-g"
@@ -322,11 +322,11 @@ def test_latest_off_wins_and_dedupe():
 
 
 def test_read_logs(tmp_path):
-    from butler import bot
-    from butler.config import settings
+    from zebplug import bot
+    from zebplug.config import settings
 
-    (settings().data_path / "butler.log.1").write_text("old line\n")
-    (settings().data_path / "butler.log").write_text("new line 1\nnew line 2\n")
+    (settings().data_path / "zebplug.log.1").write_text("old line\n")
+    (settings().data_path / "zebplug.log").write_text("new line 1\nnew line 2\n")
     assert bot.read_logs() == ["old line", "new line 1", "new line 2"]
     assert bot.read_logs(2) == ["new line 1", "new line 2"]
 
@@ -391,7 +391,7 @@ def test_heat_push_mode_uses_few_api_calls(monkeypatch):
     assert not g.on and "Water's hot" in events[-1]
     # restart while heating: the watch resumes and the next low push still acts
     commands.execute("geyser on")
-    from butler import store
+    from zebplug import store
     with store._lock:  # pretend it was switched on 20 min ago
         store.conn().execute("UPDATE states SET ts = ts - 1200 WHERE device='geyser'")
     scheduler._heat.clear(); scheduler._last_on.clear()
@@ -405,8 +405,8 @@ def test_heat_push_mode_uses_few_api_calls(monkeypatch):
 def test_web_api(monkeypatch):
     import asyncio
     from aiohttp.test_utils import TestClient, TestServer
-    from butler import web
-    from butler.config import settings
+    from zebplug import web
+    from zebplug.config import settings
 
     monkeypatch.setattr(settings(), "api_token", "s3cret")
     seen = []
@@ -457,15 +457,42 @@ def test_change_routine_keeps_others():
 
 
 def test_gemini_days_normalised():
-    from butler import llm
+    from zebplug import llm
     assert llm._norm_days("u002a") == "*" and llm._norm_days("\\u002a") == "*" and llm._norm_days("Mon-Fri") == "mon-fri"
 
 
 def test_malformed_gemini_falls_back(monkeypatch):
-    from butler import llm
+    from zebplug import llm
     monkeypatch.setattr(llm, "enabled", lambda: True)
     def bad(*a, **k):
         raise llm.FormatError("bad days '(|mon-fri)'")
     monkeypatch.setattr(llm, "parse", bad)
     out = commands.execute("every day at sunset purifier on")
     assert out.startswith("🌇") and "at sunset" in out
+
+
+def test_undo_restores_previous_state():
+    commands.execute("every day at sunset purifier on", use_llm=False)
+    commands.execute("every day 12:30am purifier off", use_llm=False)
+    before = sorted(g["text"] for g in commands.schedule_groups())
+    # a "change" that (wrongly) wipes everything for the device, then adds a new off time
+    r = commands.respond("cancel purifier", use_llm=False)
+    commands.execute("every day 11:30pm purifier off", use_llm=False)  # separate change → its own undo
+    assert r.snapshot is not None
+    r2 = commands.respond("every day 10pm purifier off", use_llm=False)
+    commands.undo(r2.groups, r2.switched, r2.away, r2.snapshot)  # undo only the last change
+    assert not any("10 pm" in g["text"] for g in commands.schedule_groups())
+    commands.undo(r.groups, r.switched, r.away, r.snapshot)  # back to before the cancel
+    assert sorted(g["text"] for g in commands.schedule_groups()) == before
+
+
+def test_undo_switch_and_away():
+    r = commands.respond("purifier on", use_llm=False)
+    commands.undo(r.groups, r.switched, r.away, r.snapshot)
+    assert not devices.get("purifier").on
+    commands.execute("every day 7am purifier on", use_llm=False)
+    r = commands.respond("away for 3 days", use_llm=False)
+    assert commands.away_banner()
+    commands.undo(r.groups, r.switched, r.away, r.snapshot)
+    assert commands.away_banner() is None and all(j["next_run"] for j in scheduler.list_jobs())
+    assert commands.respond("status", use_llm=False).snapshot is None  # nothing changed → no undo

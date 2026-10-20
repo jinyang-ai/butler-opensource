@@ -451,3 +451,54 @@ def away_end(silent: bool = False) -> int:
 
 def end_away(silent: bool = False) -> int:
     return away_end(silent=silent)
+
+
+# ---------- snapshots (for Undo: restore the exact schedule state before a change) ----------
+
+def _trigger_spec(trigger) -> dict:
+    if isinstance(trigger, DateTrigger):
+        return {"type": "date", "at": trigger.run_date.isoformat()}
+    if isinstance(trigger, SunTrigger):
+        return {"type": "sun", "event": trigger.event, "offset": trigger.offset_minutes, "dow": trigger.dow}
+    if isinstance(trigger, CronTrigger):
+        return {"type": "cron", "fields": {f.name: str(f) for f in trigger.fields if not f.is_default}}
+    raise ValueError(f"unsupported trigger {trigger!r}")
+
+
+def _trigger_from(spec: dict):
+    if spec["type"] == "date":
+        return DateTrigger(run_date=datetime.fromisoformat(spec["at"]))
+    if spec["type"] == "sun":
+        return SunTrigger(spec["event"], spec["offset"], spec["dow"], timezone=TZ)
+    return CronTrigger(timezone=TZ, **spec["fields"])
+
+
+_FUNCS = {"run_action": lambda: run_action, "away_start": lambda: away_start, "away_end": lambda: away_end}
+
+
+def snapshot() -> dict:
+    """JSON-serialisable copy of every persisted job (routines, timers, away jobs) + away state."""
+    jobs = []
+    for j in scheduler().get_jobs(jobstore="default"):
+        name = getattr(j.func, "__name__", "")
+        if name not in _FUNCS:
+            continue
+        jobs.append({"id": j.id, "func": name, "kwargs": dict(j.kwargs), "trigger": _trigger_spec(j.trigger),
+                     "paused": getattr(j, "next_run_time", None) is None})
+    return {"jobs": sorted(jobs, key=lambda x: x["id"]), "away": away_state()}
+
+
+def restore(snap: dict) -> None:
+    s = scheduler()
+    for j in s.get_jobs(jobstore="default"):
+        if getattr(j.func, "__name__", "") in _FUNCS:
+            s.remove_job(j.id)
+    now = datetime.now(TZ)
+    for spec in snap.get("jobs", []):
+        trig = _trigger_from(spec["trigger"])
+        if spec["trigger"]["type"] == "date" and trig.run_date <= now:
+            continue  # a one-off whose time has passed meanwhile
+        job = s.add_job(_FUNCS[spec["func"]](), trig, id=spec["id"], kwargs=spec["kwargs"], replace_existing=True)
+        if spec.get("paused"):
+            job.pause()
+    _save_away(snap.get("away") or {})

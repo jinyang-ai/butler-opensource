@@ -85,6 +85,8 @@ def render_schedules(st: dict) -> tuple[str, InlineKeyboardMarkup]:
     else:
         lines += ["", "Nothing scheduled. Type e.g. “geyser daily 6–6:30am”."]
     rows = [[Btn(f"❌ {g['text']}"[:64], callback_data=f"xg:{g['group']}")] for g in groups]
+    if st.get("undo"):
+        rows.append([Btn("↩️ Undo last change", callback_data="undo")])
     rows.append([Btn("← Back", callback_data="view:home")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
@@ -248,8 +250,8 @@ def _set_last(chat_id: int, r: commands.Reply | None, text: str | None = None, v
     st = STATE.get(chat_id)
     st["view"] = view
     st["last"] = text if text is not None else (r.text if r else "")
-    st["undo"] = ({"groups": r.groups, "switched": r.switched, "away": r.away}
-                  if r and (r.groups or r.switched or r.away) else None)
+    st["undo"] = ({"groups": r.groups, "switched": r.switched, "away": r.away, "snapshot": r.snapshot}
+                  if r and (r.snapshot is not None or r.switched) else None)
     STATE.save()
 
 
@@ -274,9 +276,9 @@ async def _delete_incoming(update: Update):
 
 def read_logs(max_lines: int = 3000) -> list[str]:
     """Newest last; includes rotated files so restarts don't lose history."""
-    base = settings().data_path / "butler.log"
+    base = settings().data_path / "zebplug.log"
     lines: list[str] = []
-    for f in [base.with_name(f"butler.log.{i}") for i in (3, 2, 1)] + [base]:
+    for f in [base.with_name(f"zebplug.log.{i}") for i in (3, 2, 1)] + [base]:
         if f.exists():
             lines += f.read_text(encoding="utf-8", errors="replace").splitlines()
     return lines[-max_lines:]
@@ -288,7 +290,7 @@ async def send_logs(bot, chat_id: int):
         return await bot.send_message(chat_id, "No logs yet.")
     stamp = datetime.now(nlp.TZ).strftime("%Y%m%d-%H%M")
     doc = await bot.send_document(chat_id, document=("\n".join(lines) + "\n").encode(),
-                                  filename=f"butler-logs-{stamp}.txt", disable_notification=True,
+                                  filename=f"zebplug-logs-{stamp}.txt", disable_notification=True,
                                   caption=f"Full log · last {len(lines)} lines")
     recent, size = [], 0
     for line in reversed(lines):  # as many recent lines as fit in one message
@@ -309,7 +311,7 @@ async def send_export(bot, chat_id: int):
     caption = ("📋 Full power & usage history, every device. Open → Share to your AI app, or save.\n"
                + " · ".join(f"{d['label']}: {d['totals']['runs']} runs, {d['totals']['energy_kwh']} kWh"
                             for d in data["devices"]))
-    await bot.send_document(chat_id, document=body, filename=f"butler-history-{stamp}.json", caption=caption[:1000],
+    await bot.send_document(chat_id, document=body, filename=f"zebplug-history-{stamp}.json", caption=caption[:1000],
                             disable_notification=True,
                             reply_markup=InlineKeyboardMarkup([[Btn("🗑 Delete", callback_data="dl:0")]]))
 
@@ -434,16 +436,19 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         _set_last(cid, r)
         await q.answer()
     elif kind == "ext":
+        snap = await asyncio.to_thread(scheduler.snapshot)
         when = await asyncio.to_thread(commands.extend, arg, 15)
         cap = commands.cap_time(arg)
         note = " (2 h max reached)" if cap and when >= cap else ""
         _set_last(cid, None, text=f"⏱ {devices.get(arg).display} now turns off at {commands.fmt_t(when)}{note}")
+        st["undo"] = {"groups": [], "switched": [], "away": False, "snapshot": snap}
+        STATE.save()
         await q.answer()
     elif kind == "undo":
         u = st.get("undo")
         if u:
             msg = await asyncio.to_thread(commands.undo, u["groups"], [tuple(x) for x in u["switched"]],
-                                          u.get("away", False))
+                                          u.get("away", False), u.get("snapshot"))
             _set_last(cid, None, text=msg)
         await q.answer("Undone" if u else "Nothing to undo")
     elif kind == "find":
@@ -526,8 +531,12 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         _set_last(cid, None, text=r.text)
         await q.answer()
     elif kind == "xg":
+        snap = await asyncio.to_thread(scheduler.snapshot)
         n = await asyncio.to_thread(commands.cancel_group, arg)
         st["view"] = "schedules"
+        if n:
+            st["last"] = "🗑 Schedule cancelled"
+            st["undo"] = {"groups": [], "switched": [], "away": False, "snapshot": snap}
         STATE.save()
         await q.answer("Cancelled" if n else "Already gone")
     elif kind == "view":

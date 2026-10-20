@@ -45,6 +45,7 @@ class Reply:
     views: set[str] = field(default_factory=set)  # "status" / "schedules" → bot shows that view
     switched: list[tuple[str, bool]] = field(default_factory=list)  # (device, new state) for immediate switches
     away: bool = False  # away mode was switched on (undo = end it)
+    snapshot: dict | None = None  # schedule state before this command, if it changed anything
 
 
 # ---------- formatting ----------
@@ -617,19 +618,25 @@ def parse(text: str, use_llm: bool = True) -> list[nlp.Command]:
 
 def respond(text: str, use_llm: bool = True) -> Reply:
     _tl.groups, _tl.views, _tl.switched, _tl.away = [], set(), [], False
+    before = scheduler.snapshot()
     try:
         body = "\n".join(filter(None, (run(cmd) for cmd in parse(text, use_llm))))
     except (devices.PlugError, ValueError) as e:
         body = f"⚠️ {e}"
-    return Reply(body, list(_tl.groups), set(_tl.views), list(_tl.switched), _tl.away)
+    changed = scheduler.snapshot() != before
+    return Reply(body, list(_tl.groups), set(_tl.views), list(_tl.switched), _tl.away, before if changed else None)
 
 
-def undo(groups: list[str], switched: list[tuple[str, bool]], away: bool = False) -> str:
-    """Reverse the last action: cancel schedules it created, flip back plugs it switched, end away mode."""
-    if away:
-        scheduler.end_away(silent=True)
-    for g in groups:
-        cancel_group(g)
+def undo(groups: list[str], switched: list[tuple[str, bool]], away: bool = False, snapshot: dict | None = None) -> str:
+    """Go back to how things were before the last change: restore the schedule snapshot (routines, timers,
+    away mode — including anything that change cancelled) and flip back plugs it switched."""
+    if snapshot is not None:
+        scheduler.restore(snapshot)
+    else:  # older undo records without a snapshot
+        if away:
+            scheduler.end_away(silent=True)
+        for g in groups:
+            cancel_group(g)
     for name, now_on in switched:
         dev = devices.get(name)
         dev.set(not now_on)
@@ -637,7 +644,7 @@ def undo(groups: list[str], switched: list[tuple[str, bool]], away: bool = False
         scheduler.hold(name, False)
         if not now_on:  # it was on before → give it the usual auto-off again
             scheduler.mark_on(name)
-            if dev.auto_off_minutes:
+            if dev.auto_off_minutes and snapshot is None:
                 scheduler.add(name, "off", at=datetime.now(nlp.TZ) + timedelta(minutes=dev.auto_off_minutes),
                               label="auto-off", group=uuid.uuid4().hex[:8])
     return "↩️ Undone"
