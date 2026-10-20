@@ -276,9 +276,9 @@ async def _delete_incoming(update: Update):
 
 def read_logs(max_lines: int = 3000) -> list[str]:
     """Newest last; includes rotated files so restarts don't lose history."""
-    base = settings().data_path / "zebplug.log"
+    base = settings().data_path / "butler.log"
     lines: list[str] = []
-    for f in [base.with_name(f"zebplug.log.{i}") for i in (3, 2, 1)] + [base]:
+    for f in [base.with_name(f"butler.log.{i}") for i in (3, 2, 1)] + [base]:
         if f.exists():
             lines += f.read_text(encoding="utf-8", errors="replace").splitlines()
     return lines[-max_lines:]
@@ -290,7 +290,7 @@ async def send_logs(bot, chat_id: int):
         return await bot.send_message(chat_id, "No logs yet.")
     stamp = datetime.now(nlp.TZ).strftime("%Y%m%d-%H%M")
     doc = await bot.send_document(chat_id, document=("\n".join(lines) + "\n").encode(),
-                                  filename=f"zebplug-logs-{stamp}.txt", disable_notification=True,
+                                  filename=f"butler-logs-{stamp}.txt", disable_notification=True,
                                   caption=f"Full log · last {len(lines)} lines")
     recent, size = [], 0
     for line in reversed(lines):  # as many recent lines as fit in one message
@@ -311,7 +311,7 @@ async def send_export(bot, chat_id: int):
     caption = ("📋 Full power & usage history, every device. Open → Share to your AI app, or save.\n"
                + " · ".join(f"{d['label']}: {d['totals']['runs']} runs, {d['totals']['energy_kwh']} kWh"
                             for d in data["devices"]))
-    await bot.send_document(chat_id, document=body, filename=f"zebplug-history-{stamp}.json", caption=caption[:1000],
+    await bot.send_document(chat_id, document=body, filename=f"butler-history-{stamp}.json", caption=caption[:1000],
                             disable_notification=True,
                             reply_markup=InlineKeyboardMarkup([[Btn("🗑 Delete", callback_data="dl:0")]]))
 
