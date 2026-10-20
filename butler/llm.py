@@ -37,6 +37,7 @@ class Step(BaseModel):
     sun: Optional[Sun] = Field(None, description="start at sunrise/sunset instead of a clock time")
     hours: Optional[float] = Field(None, description="energy lookback window in hours")
     cancel_target: Optional[str] = Field(None, description='"all", a device name, or a schedule id prefix')
+    cancel_action: Optional[Literal["on", "off"]] = Field(None, description='only cancel that device\'s ON or OFF routines')
     away_from: Optional[str] = Field(None, description='away mode start day "YYYY-MM-DD" (null = starting now)')
     away_until: Optional[str] = Field(None, description='away mode return day "YYYY-MM-DD" (routines resume at its start)')
     no_auto_off: bool = Field(False, description='true only if the user explicitly wants it left on with no end ("indefinitely", "until I say")')
@@ -66,7 +67,10 @@ Rules:
 - Times without am/pm: pick the next sensible occurrence after now ("at 6" in the evening → 18:00 if 6am passed).
   "morning" = am, "evening/tonight/night" = pm.
 - status: questions like "is the geyser on?", "what's running". list: "schedules", "what's planned".
-- cancel: "cancel/stop the 6am schedule", "clear all timers". energy: usage/kWh/consumption questions;
+- cancel: "cancel/stop the 6am schedule", "clear all timers".
+- CHANGING an existing routine ("change/move the lamp off time to 11:30") = cancel ONLY that kind: cancel step with
+  cancel_target=<device> and cancel_action="off" (or "on"), then a power step with the new time. Never cancel the
+  device's other routines. energy: usage/kWh/consumption questions;
   "today" = hours since midnight, "this week" = 168.
 - away: user is travelling / away / wants all routines paused for a while. Set away_until to the RETURN day
   ("away for 5 days" → today + 5; "back on 25th" → that date; "till Sunday" → that Sunday). away_from only if a
@@ -75,6 +79,18 @@ Rules:
 - If you cannot map the message to these intents, return no steps and a short clarification.
 
 Now: {now} ({weekday})."""
+
+
+class FormatError(ValueError):
+    """Gemini produced a malformed field — caller should fall back to the offline parser."""
+
+
+def _norm_days(days: str | None) -> str | None:
+    """Gemini sometimes escapes '*' (→ 'u002a') or says 'daily'."""
+    if days is None:
+        return None
+    d = days.strip().lower().replace("\\u002a", "*").replace("u002a", "*")
+    return "*" if d in ("*", "daily", "every day", "everyday", "all", "") else d
 
 
 def _device_lines() -> str:
@@ -121,9 +137,9 @@ def _to_command(step: Step, aliases: dict[str, str], now: datetime) -> nlp.Comma
                 raise ValueError(f"{at:%H:%M %d %b} is in the past")
             cmd.at = at
         if step.sun:
-            sd = (step.sun.days or "").strip().lower() or None
+            sd = _norm_days(step.sun.days) if step.sun.days else None
             if sd and not re.fullmatch(r"\*|(?:mon|tue|wed|thu|fri|sat|sun)(?:[-,](?:mon|tue|wed|thu|fri|sat|sun))*", sd):
-                raise ValueError(f"bad days {sd!r}")
+                raise FormatError(f"bad days {sd!r}")
             if sd:
                 cmd.sun = (step.sun.event, step.sun.offset_minutes, sd)
             else:
@@ -131,10 +147,10 @@ def _to_command(step: Step, aliases: dict[str, str], now: datetime) -> nlp.Comma
                 cmd.at = next_sun(step.sun.event, step.sun.offset_minutes, now)
         if step.cron and not step.sun:
             c = step.cron
-            days = c.days.strip().lower()
+            days = _norm_days(c.days)
             if not (0 <= c.hour <= 23 and 0 <= c.minute <= 59) or not re.fullmatch(
                 r"\*|(?:mon|tue|wed|thu|fri|sat|sun)(?:[-,](?:mon|tue|wed|thu|fri|sat|sun))*", days):
-                raise ValueError(f"bad recurring schedule {c}")
+                raise FormatError(f"bad recurring schedule {c}")
             cmd.cron = (c.hour, c.minute, days)
     elif step.intent == "energy":
         cmd.hours = max(step.hours or 24, 0.1)
@@ -155,6 +171,7 @@ def _to_command(step: Step, aliases: dict[str, str], now: datetime) -> nlp.Comma
         cmd.target = "all" if t == "all" else t
         if t in aliases:
             cmd.devices = [aliases[t]]
+        cmd.action = step.cancel_action
     return cmd
 
 

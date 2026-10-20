@@ -354,6 +354,12 @@ def _cancel(cmd: nlp.Command) -> str:
         hit = jobs
     elif cmd.devices:
         hit = [j for j in jobs if j["device"] in cmd.devices]
+        if cmd.action in ("on", "off"):  # only routines that switch the device that way (whole on→off pairs)
+            groups = {j["group"] for j in hit if j["action"] == cmd.action and j["label"] and
+                      (" · " not in j["label"] or j["label"].startswith(cmd.action))}
+            groups |= {j["group"] for j in hit if j["action"] == cmd.action and not any(
+                k["group"] == j["group"] and k["action"] != cmd.action for k in hit)}
+            hit = [j for j in hit if j["group"] in groups]
     else:
         hit = [j for j in jobs if j["id"].startswith(t) or j["group"].startswith(t)]
     for j in hit:
@@ -600,8 +606,8 @@ def parse(text: str, use_llm: bool = True) -> list[nlp.Command]:
     if use_llm and llm.enabled():
         try:
             return llm.parse(text, al, recent=[devices.get(n).display for n in recent_devices()])
-        except ValidationError:
-            log.warning("gemini returned an invalid structure; falling back", exc_info=True)
+        except (ValidationError, llm.FormatError):
+            log.warning("gemini returned a malformed command; falling back to offline parser", exc_info=True)
         except ValueError as e:  # model understood but asked for something invalid (past time, unknown device)
             return [nlp.Command("unknown", error=str(e))]
         except Exception:

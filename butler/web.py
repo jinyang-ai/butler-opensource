@@ -81,8 +81,8 @@ async def start(on_action) -> web.AppRunner | None:
     if not s.api_token:
         log.info("web API disabled (no API_TOKEN)")
         return None
-    runner = web.AppRunner(make_app(on_action))
+    runner = web.AppRunner(make_app(on_action), access_log=None)
     await runner.setup()
-    await web.TCPSite(runner, s.web_host, s.web_port).start()
+    await web.TCPSite(runner, s.web_host, s.web_port).start()  # no access log: URLs carry the API token
     log.info("web API on %s:%s", s.web_host, s.web_port)
     return runner

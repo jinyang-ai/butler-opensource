@@ -445,3 +445,27 @@ def test_export_history():
     assert gd["totals"]["runs"] == 1 and gd["runs"][0]["energy_kwh"] == 0.25 and gd["metered"]
     assert gd["daily"][0]["kwh"] == 0.25 and gd["state_changes"][0]["on"] is True
     assert any(d["name"] == "purifier" for d in data["devices"])
+
+
+def test_change_routine_keeps_others():
+    commands.execute("every day at sunset purifier on", use_llm=False)
+    commands.execute("every day 12:30am purifier off", use_llm=False)
+    c = commands.nlp.Command("cancel", devices=["purifier"], target="purifier", action="off")
+    assert "Cancelled 1" in commands.run(c)
+    texts = [g["text"] for g in commands.schedule_groups()]
+    assert any("sunset" in t for t in texts) and not any("12:30" in t for t in texts)
+
+
+def test_gemini_days_normalised():
+    from butler import llm
+    assert llm._norm_days("u002a") == "*" and llm._norm_days("\\u002a") == "*" and llm._norm_days("Mon-Fri") == "mon-fri"
+
+
+def test_malformed_gemini_falls_back(monkeypatch):
+    from butler import llm
+    monkeypatch.setattr(llm, "enabled", lambda: True)
+    def bad(*a, **k):
+        raise llm.FormatError("bad days '(|mon-fri)'")
+    monkeypatch.setattr(llm, "parse", bad)
+    out = commands.execute("every day at sunset purifier on")
+    assert out.startswith("🌇") and "at sunset" in out
