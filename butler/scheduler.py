@@ -502,3 +502,34 @@ def restore(snap: dict) -> None:
         if spec.get("paused"):
             job.pause()
     _save_away(snap.get("away") or {})
+
+
+# ---------- presence (phone joins / leaves home Wi-Fi via iOS Shortcuts) ----------
+
+presence = {"state": None, "arrived": 0.0}  # state: "home" | "out" | None (unknown)
+LEAVE_JOB = "_leave_home"
+
+
+def leave_now() -> None:
+    """Runs LEAVE_DELAY_MINUTES after the phone left Wi-Fi (unless it came back)."""
+    from . import commands
+
+    presence["state"] = "out"
+    r = commands.respond(settings().leave_command, False)
+    msg = "👋 You left home — " + r.text.replace("*", "").replace("✅ ", "")
+    log.info(msg)
+    notify.event(msg)
+
+
+def schedule_leave() -> datetime:
+    when = datetime.now(TZ) + timedelta(minutes=settings().leave_delay_minutes)
+    scheduler().add_job(leave_now, DateTrigger(run_date=when), id=LEAVE_JOB, replace_existing=True)
+    return when
+
+
+def cancel_leave() -> bool:
+    s = scheduler()
+    if s.get_job(LEAVE_JOB):
+        s.remove_job(LEAVE_JOB)
+        return True
+    return False

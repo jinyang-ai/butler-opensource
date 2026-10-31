@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     arrive_command: str = "purifier on"  # what /arrive does when your phone joins home Wi-Fi
     arrive_cooldown_minutes: int = 120  # ignore repeat arrivals (Wi-Fi blips) within this window
+    leave_command: str = "purifier off"  # what /leave does when your phone drops off home Wi-Fi
+    leave_delay_minutes: int = 10  # wait this long; rejoining Wi-Fi meanwhile cancels it (blip)
 
     telegram_bot_token: str = ""
     telegram_allowed_chat_ids: str = ""

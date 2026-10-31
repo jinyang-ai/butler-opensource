@@ -98,6 +98,7 @@ def main(specs: list[str]) -> None:
         made.append(write(f"{icon} {label}".strip(), simple(f"{base}/toggle/{name}?token={tok}", ORANGE)))
     made.append(write("🏠 Home status", simple(f"{base}/status?token={tok}", BLUE)))
     made.append(write("🏠 Arrived home", simple(f"{base}/arrive?token={tok}", BLUE)))
+    made.append(write("👋 Left home", simple(f"{base}/leave?token={tok}", GREY)))
     made.append(write("⏻ All off", simple(f"{base}/cmd?token={tok}&text={quote('turn everything off')}", GREY)))
     made.append(write("🎙 Ask Butler", ask(base, s.api_token)))
     for p in made:

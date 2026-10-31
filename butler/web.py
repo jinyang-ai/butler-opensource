@@ -65,22 +65,23 @@ def make_app(on_action) -> web.Application:
             return web.Response(status=400, text="say something, e.g. geyser on for 20 min")
         return await run(str(text), use_llm=True)
 
-    last_arrival = {"ts": 0.0}
-
     async def arrive(request: web.Request) -> web.Response:
-        """Phone joined home Wi-Fi (iOS Shortcuts automation). Runs ARRIVE_COMMAND at most once per cooldown,
-        and ends away mode if it was on."""
+        """Phone joined home Wi-Fi (iOS Shortcuts automation). Cancels a pending 'left home'; runs ARRIVE_COMMAND
+        unless you were already home (within the cooldown); ends away mode."""
         import time as _time
 
         from . import scheduler
 
+        p = scheduler.presence
+        if await asyncio.to_thread(scheduler.cancel_leave):
+            log.info("arrive: back within the leave delay — treated as a Wi-Fi blip")
+            p["state"] = "home"
+            return web.Response(text="🏠 Back on Wi-Fi — leave cancelled, nothing changed")
         now = _time.time()
-        cooldown = settings().arrive_cooldown_minutes * 60
-        if now - last_arrival["ts"] < cooldown:
-            mins = round((now - last_arrival["ts"]) / 60)
-            log.info("arrive: ignored (last arrival %s min ago)", mins)
+        if p["state"] == "home" and now - p["arrived"] < settings().arrive_cooldown_minutes * 60:
+            mins = round((now - p["arrived"]) / 60)
             return web.Response(text=f"🏠 Already home (arrived {mins} min ago) — nothing to do")
-        last_arrival["ts"] = now
+        p.update(state="home", arrived=now)
         notes = []
         if scheduler.away_state():
             n = await asyncio.to_thread(scheduler.end_away, True)
@@ -94,6 +95,15 @@ def make_app(on_action) -> web.Application:
             log.exception("dashboard refresh after arrive failed")
         return web.Response(text=reply)
 
+    async def leave(request: web.Request) -> web.Response:
+        """Phone left home Wi-Fi. Acts after LEAVE_DELAY_MINUTES unless the phone rejoins first."""
+        from . import scheduler
+
+        when = await asyncio.to_thread(scheduler.schedule_leave)
+        log.info("leave: scheduled for %s", when.isoformat(timespec="minutes"))
+        return web.Response(text=f"👋 Leaving — '{settings().leave_command}' at {commands.fmt_t(when)} "
+                                 "unless you're back on Wi-Fi before then")
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -101,6 +111,7 @@ def make_app(on_action) -> web.Application:
     app.router.add_get("/health", health)
     app.router.add_get("/status", status)
     app.router.add_get("/arrive", arrive)
+    app.router.add_get("/leave", leave)
     app.router.add_route("*", "/cmd", cmd)
     app.router.add_get(r"/{action:on|off|toggle}/{device}", device_action)
     return app
