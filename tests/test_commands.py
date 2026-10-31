@@ -496,3 +496,28 @@ def test_undo_switch_and_away():
     commands.undo(r.groups, r.switched, r.away, r.snapshot)
     assert commands.away_banner() is None and all(j["next_run"] for j in scheduler.list_jobs())
     assert commands.respond("status", use_llm=False).snapshot is None  # nothing changed → no undo
+
+
+def test_arrive_home(monkeypatch):
+    import asyncio
+    from aiohttp.test_utils import TestClient, TestServer
+    from butler import web
+    from butler.config import settings
+
+    monkeypatch.setattr(settings(), "api_token", "t")
+    monkeypatch.setattr(scheduler.notify, "event", lambda *_: None)
+    commands.execute("every day 7am purifier on", use_llm=False)
+    commands.respond("away for 3 days", use_llm=False)
+
+    async def on_action(text): pass
+
+    async def go():
+        async with TestClient(TestServer(web.make_app(on_action))) as c:
+            t1 = await (await c.get("/arrive?token=t")).text()
+            assert "You're home" in t1 and "away mode off" in t1 and devices.get("purifier").on
+            devices.get("purifier").on = False  # turned off on purpose
+            t2 = await (await c.get("/arrive?token=t")).text()  # Wi-Fi blip → rejoin
+            assert "Already home" in t2 and not devices.get("purifier").on
+
+    asyncio.run(go())
+    assert commands.away_banner() is None

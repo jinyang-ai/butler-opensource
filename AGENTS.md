@@ -133,6 +133,10 @@ On Linux, copy the systemd unit from `deploy/provision-oracle.sh`.
    ```
 4. 👤 Send the files to their iPhone and open each → **Add Shortcut**. The first run asks to allow the domain: **Always Allow**. On the Watch they appear in the Shortcuts app, and can be added to a watch face as complications.
 
+### Optional: "arrived home" automation (iPhone)
+`/arrive` runs `ARRIVE_COMMAND` (default `purifier on`) at most once per `ARRIVE_COOLDOWN_MINUTES` (default 120), and ends away mode. `make_shortcuts.py` creates **🏠 Arrived home**.
+👤 To trigger it: Shortcuts → **Automation → + → Wi-Fi** → choose the home network → **Is Connected** → **Run Immediately** → action **Run Shortcut → 🏠 Arrived home**.
+
 ## 8. Hand over
 Tell the human:
 - **Day-to-day:** use the dashboard buttons, or type or speak commands. The examples are in `/help`.

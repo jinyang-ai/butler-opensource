@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("~/.butler")
     energy_poll_seconds: int = 60
-    latitude: float = 12.9716  # for sunrise/sunset — set to your city (default: Bengaluru)
+    latitude: float = 12.9716  # for sunrise/sunset (default: Bengaluru)
     longitude: float = 77.5946
     notify_state_changes: bool = True  # phone notification for changes you didn't make from the chat
     tuya_push: bool = True  # real-time updates via Tuya Message Service (needs it enabled on the project)
@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = 8787
     public_url: str = ""  # e.g. https://1-2-3-4.sslip.io (your server IP with dashes) — used when generating Shortcuts
+
+    arrive_command: str = "purifier on"  # what /arrive does when your phone joins home Wi-Fi
+    arrive_cooldown_minutes: int = 120  # ignore repeat arrivals (Wi-Fi blips) within this window
 
     telegram_bot_token: str = ""
     telegram_allowed_chat_ids: str = ""
