@@ -115,14 +115,16 @@ def observed(name: str, on: bool, watts: float | None = None) -> None:
     if prev == on or (exp and exp[0] == on and time.time() - exp[1] < 15 * 60):
         return
     note = ""
-    if on and away_state().get("active"):  # away guard: nothing should run while you're away
+    strict = settings().external_changes == "revert"
+    if strict or (on and away_state().get("active")):  # Butler overrides changes made elsewhere
+        why = "while you're away" if (on and away_state().get("active")) else "— Butler is in control"
         try:
-            dev.set(False)
-            expect(name, False)
-            notify.send(f"🛡 {dev.icon} {dev.display} was switched on outside Butler while you're away "
-                        "(app schedule, voice assistant or switch?) — turned it off.")
+            dev.set(prev)
+            expect(name, prev)
+            notify.send(f"🛡 {dev.icon} {dev.display} was switched {'on' if on else 'off'} outside Butler {why} "
+                        f"(app schedule, voice assistant or switch?) — turned it back {'on' if prev else 'off'}.")
         except Exception as e:
-            notify.send(f"⚠️ {dev.display} came on while you're away and turning it off failed: {e}")
+            notify.send(f"⚠️ {dev.display} changed outside Butler and reverting it failed: {e}")
         return
     if on:
         mark_on(name)

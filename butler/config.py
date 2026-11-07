@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     energy_poll_seconds: int = 60
     latitude: float = 12.9716  # for sunrise/sunset (default: Bengaluru)
     longitude: float = 77.5946
+    # "revert": Butler is the only control centre — on/off made elsewhere (app schedules, voice assistants,
+    # wall button) is switched straight back. "allow": accept them (away mode still reverts).
+    external_changes: str = "allow"
     notify_state_changes: bool = True  # phone notification for changes you didn't make from the chat
     tuya_push: bool = True  # real-time updates via Tuya Message Service (needs it enabled on the project)
 

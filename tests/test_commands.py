@@ -544,3 +544,16 @@ def test_away_guard_turns_off_external_on(monkeypatch):
     devices.get("geyser").on = True  # e.g. a Smart Life schedule fires
     scheduler.observed("geyser", True)
     assert not devices.get("geyser").on and "while you're away" in sent[-1]
+
+
+def test_strict_mode_reverts_external_changes(monkeypatch):
+    from butler.config import settings
+    sent = []
+    monkeypatch.setattr(scheduler.notify, "send", sent.append)
+    monkeypatch.setattr(scheduler.notify, "event", lambda *_: None)
+    monkeypatch.setattr(settings(), "external_changes", "revert")
+    scheduler._last_on.clear(); scheduler._expected.clear()
+    commands.execute("purifier on", use_llm=False)  # via Butler → stays on
+    devices.get("purifier").on = False  # switched off in the app
+    scheduler.observed("purifier", False)
+    assert devices.get("purifier").on and "turned it back on" in sent[-1]
