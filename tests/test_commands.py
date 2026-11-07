@@ -532,3 +532,15 @@ def test_arrive_and_leave(monkeypatch):
             assert "You're home" in t and devices.get("purifier").on
 
     asyncio.run(go())
+
+
+def test_away_guard_turns_off_external_on(monkeypatch):
+    sent = []
+    monkeypatch.setattr(scheduler.notify, "send", sent.append)
+    monkeypatch.setattr(scheduler.notify, "event", lambda *_: None)
+    commands.respond("away for 3 days", use_llm=False)
+    scheduler._last_on.clear(); scheduler._expected.clear()
+    scheduler.observed("geyser", False)
+    devices.get("geyser").on = True  # e.g. a Smart Life schedule fires
+    scheduler.observed("geyser", True)
+    assert not devices.get("geyser").on and "while you're away" in sent[-1]

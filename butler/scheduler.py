@@ -115,6 +115,15 @@ def observed(name: str, on: bool, watts: float | None = None) -> None:
     if prev == on or (exp and exp[0] == on and time.time() - exp[1] < 15 * 60):
         return
     note = ""
+    if on and away_state().get("active"):  # away guard: nothing should run while you're away
+        try:
+            dev.set(False)
+            expect(name, False)
+            notify.send(f"🛡 {dev.icon} {dev.display} was switched on outside Butler while you're away "
+                        "(app schedule, voice assistant or switch?) — turned it off.")
+        except Exception as e:
+            notify.send(f"⚠️ {dev.display} came on while you're away and turning it off failed: {e}")
+        return
     if on:
         mark_on(name)
         limit = dev.auto_off_minutes or dev.max_on_minutes
