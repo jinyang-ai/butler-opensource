@@ -430,6 +430,8 @@ def away_start(silent: bool = False) -> dict:
             paused.append(j.id)
     state.update(active=True, paused=paused)
     _save_away(state)
+    if failed := child_locks(True):
+        notify.send(f"⚠️ Away mode: couldn't lock the button on {', '.join(failed)}")
     for dev in devices.registry().values():
         try:
             dev.set(False)
@@ -440,6 +442,20 @@ def away_start(silent: bool = False) -> dict:
         until = datetime.fromisoformat(state["until"])
         notify.event(f"✈️ Away mode on — routines paused until {until:%a %-d %b}")
     return state
+
+
+def child_locks(locked: bool) -> list[str]:
+    """Lock (away starts) / unlock (away ends) every plug's wall button. Returns devices that failed."""
+    failed = []
+    for dev in devices.registry().values():
+        try:
+            dev.set_child_lock(locked)
+        except NotImplementedError:
+            pass
+        except Exception as e:
+            log.warning("child lock %s → %s failed: %s", dev.name, locked, e)
+            failed.append(dev.display)
+    return failed
 
 
 def away_end(silent: bool = False) -> int:
@@ -454,6 +470,8 @@ def away_end(silent: bool = False) -> int:
             groups.add(job.kwargs.get("group") or jid)
             s.resume_job(jid)  # one-offs that fell inside the trip are dropped by APScheduler here
     n = len(groups)
+    if state.get("active"):
+        child_locks(False)
     _save_away({})
     if state and not silent:
         notify.event(f"🏠 Welcome back — {n} routine{'s' if n != 1 else ''} resumed")
@@ -500,6 +518,9 @@ def snapshot() -> dict:
 
 
 def restore(snap: dict) -> None:
+    was_away, will_be_away = bool(away_state().get("active")), bool((snap.get("away") or {}).get("active"))
+    if was_away != will_be_away:  # keep wall-button locks in step with away mode
+        child_locks(will_be_away)
     s = scheduler()
     for j in s.get_jobs(jobstore="default"):
         if getattr(j.func, "__name__", "") in _FUNCS:

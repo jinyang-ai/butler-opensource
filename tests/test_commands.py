@@ -18,6 +18,9 @@ class FakePlug(devices.Device):
         self.on = on
         return self.status()
 
+    def set_child_lock(self, locked):
+        self.locked = locked
+
 
 @pytest.fixture(autouse=True)
 def env(tmp_path, monkeypatch):
@@ -557,3 +560,14 @@ def test_strict_mode_reverts_external_changes(monkeypatch):
     devices.get("purifier").on = False  # switched off in the app
     scheduler.observed("purifier", False)
     assert devices.get("purifier").on and "turned it back on" in sent[-1]
+
+
+
+def test_away_locks_buttons():
+    r = commands.respond("away for 3 days", use_llm=False)
+    assert all(getattr(d, "locked", None) is True for d in devices.registry().values())
+    commands.execute("I'm back", use_llm=False)
+    assert all(d.locked is False for d in devices.registry().values())
+    r = commands.respond("away for 2 days", use_llm=False)
+    commands.undo(r.groups, r.switched, r.away, r.snapshot)
+    assert all(d.locked is False for d in devices.registry().values())

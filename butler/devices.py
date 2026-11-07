@@ -69,6 +69,10 @@ class Device:
     def set(self, on: bool) -> PlugStatus:
         raise NotImplementedError
 
+    def set_child_lock(self, locked: bool) -> None:
+        """Lock/unlock the plug's physical button (used by away mode)."""
+        raise NotImplementedError
+
     def apply(self, action: str) -> PlugStatus:
         if action == "on":
             return self.set(True)
@@ -80,7 +84,7 @@ class Device:
 
 
 class TuyaPlug(Device):
-    DEFAULT_DPS = {"switch": 1, "energy_add": 17, "current_ma": 18, "power_dw": 19, "voltage_dv": 20}
+    DEFAULT_DPS = {"switch": 1, "energy_add": 17, "current_ma": 18, "power_dw": 19, "voltage_dv": 20, "child_lock": 41}
 
     def __init__(self, name, device_id, ip, local_key, version=3.3, dps=None, **kw):
         super().__init__(name, **kw)
@@ -129,6 +133,10 @@ class TuyaPlug(Device):
         with self._lock:
             self._check(self._dev.set_status(on, self.dps["switch"]))
         return self.status()
+
+    def set_child_lock(self, locked: bool) -> None:
+        with self._lock:
+            self._check(self._dev.set_value(self.dps["child_lock"], locked))
 
 
 def tuya_creds() -> tuple[str, str, str] | None:
@@ -194,6 +202,9 @@ class TuyaCloudPlug(Device):
         self._check(self.client().sendcommand(self.device_id, {"commands": [{"code": self.switch_code, "value": on}]}))
         self.note(on=on)  # one API call; reading it back would only echo the cloud's cache
         return self.cached
+
+    def set_child_lock(self, locked: bool) -> None:
+        self._check(self.client().sendcommand(self.device_id, {"commands": [{"code": "child_lock", "value": locked}]}))
 
 
 TYPES = {"local": TuyaPlug, "cloud": TuyaCloudPlug}
